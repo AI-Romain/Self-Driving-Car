@@ -1,33 +1,57 @@
 class Car {
-    constructor(x, y, width, height) {
+    constructor(x, y, width, height, controlType, maxSpeed = 3) {
         this._x = x;
         this._y = y;
         this._width = width;
         this._height = height;
 
-        this._sensor = new Sensor(this);
-        this._controls = new Controls();
+        this._useBrain = controlType == "AI";
+
+        if (controlType != "DUMMY") {
+            this._sensor = new Sensor(this);
+            this._brain = new NeuralNetwork(
+                [this._sensor._rayCount, 6, 4]
+            );
+        }
+        this._controls = new Controls(controlType);
 
         this._speed = 0;
         this._acceleration = 0.2;
-        this._maxSpeed = 3;
+        this._maxSpeed = maxSpeed;
         this._friction = 0.05;
         this._angle = 0;
         this._damaged = false;
     }
 
-    update(roadBorders) {
+    update(roadBorders, traffic) {
         if (!this._damaged) {
             this.#move();
             this._polygon = this.#createPolygon();
-            this._damaged = this.#assessDamage(roadBorders);
+            this._damaged = this.#assessDamage(roadBorders, traffic);
         }
-        this._sensor.update(roadBorders);
+        if (this._sensor) {
+            this._sensor.update(roadBorders, traffic);
+            const offsets = this._sensor._readings.map(
+                s => s == null ? 0 : 1 - s.offset
+            );
+            const outputs = NeuralNetwork.feedForward(offsets, this._brain);
+            if (this._useBrain) {
+                this._controls.forward = outputs[0];
+                this._controls.left = outputs[1];
+                this._controls.right = outputs[2];
+                this._controls.backward = outputs[3];
+            }
+        }
     }
 
-    #assessDamage(roadBorders) {
+    #assessDamage(roadBorders, traffic) {
         for (let i = 0; i < roadBorders.length; i++) {
             if (polysIntersect(this._polygon, roadBorders[i])) {
+                return true;
+            }
+        }
+        for (let i = 0; i < traffic.length; i++) {
+            if (polysIntersect(this._polygon, traffic[i]._polygon)) {
                 return true;
             }
         }
@@ -104,11 +128,11 @@ class Car {
         this._y -= Math.cos(this._angle) * this._speed;
     }
 
-    draw(ctx) {
+    draw(ctx, color, drawSensors = false) {
         if (this._damaged) {
             ctx.fillStyle = 'gray';
         } else {
-            ctx.fillStyle = 'black';
+            ctx.fillStyle = color;
         }
 
         ctx.beginPath();
@@ -117,7 +141,8 @@ class Car {
             ctx.lineTo(this._polygon[i].x, this._polygon[i].y);
         }
         ctx.fill();
-        this._sensor.draw(ctx);
+        if (this._sensor && drawSensors)
+            this._sensor.draw(ctx);
     }
 
     get x() {
@@ -137,5 +162,11 @@ class Car {
     }
     set angle(value) {
         this._angle = value;
+    }
+    set brain(value) {
+        this._brain = value;
+    }
+    get brain() {
+        return this._brain;
     }
 }
